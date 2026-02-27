@@ -133,7 +133,11 @@ def load_config() -> BotConfig:
 
 
 def format_daily_reminder() -> str:
-    return "@everyone\nDaily reminder: Please post your update."
+    return (
+        "@everyone\n"
+        "⏰ Daily Update Reminder\n\n"
+        "If you didn’t write your update yet, please send it now."
+    )
 
 
 def seconds_until_next_run(target_time: time, timezone_obj: ZoneInfo, weekday: Optional[int] = None) -> float:
