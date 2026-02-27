@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Optional
@@ -19,8 +20,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 WEEKLY_REPORT_TITLE = "\U0001F4CA Weekly Report"
 
@@ -41,6 +44,8 @@ class BotConfig:
     daily_reminder_time: time
     weekly_report_time: time
     weekly_report_command: str
+    manual_reminder_command: str
+    update_message_pattern: str
     one_update_per_day: bool
     rank_report: bool
     include_missed_days: bool
@@ -80,6 +85,11 @@ def load_config() -> BotConfig:
     daily_time_raw = os.getenv("DAILY_REMINDER_TIME", "16:00").strip()
     weekly_time_raw = os.getenv("WEEKLY_REPORT_TIME", "20:00").strip()
     weekly_report_command = os.getenv("WEEKLY_REPORT_COMMAND", "!weekly_report").strip()
+    manual_reminder_command = os.getenv("MANUAL_REMINDER_COMMAND", "!daily_reminder").strip()
+    update_message_pattern = os.getenv(
+        "UPDATE_MESSAGE_PATTERN",
+        r"\b(daily\W*updates?|updates?)\b",
+    ).strip()
     one_update_per_day = parse_bool(os.getenv("ONE_UPDATE_PER_DAY", "false"))
     rank_report = parse_bool(os.getenv("RANK_REPORT", "false"))
     include_missed_days = parse_bool(os.getenv("INCLUDE_MISSED_DAYS", "false"))
@@ -90,6 +100,12 @@ def load_config() -> BotConfig:
         raise ValueError("CHANNEL_ID is required.")
     if not user_ids_raw:
         raise ValueError("USER_IDS is required.")
+    if not weekly_report_command:
+        raise ValueError("WEEKLY_REPORT_COMMAND cannot be empty.")
+    if not manual_reminder_command:
+        raise ValueError("MANUAL_REMINDER_COMMAND cannot be empty.")
+    if not update_message_pattern:
+        raise ValueError("UPDATE_MESSAGE_PATTERN cannot be empty.")
 
     try:
         timezone_obj = ZoneInfo(timezone_name)
@@ -108,6 +124,8 @@ def load_config() -> BotConfig:
         daily_reminder_time=parse_time(daily_time_raw, "DAILY_REMINDER_TIME"),
         weekly_report_time=parse_time(weekly_time_raw, "WEEKLY_REPORT_TIME"),
         weekly_report_command=weekly_report_command,
+        manual_reminder_command=manual_reminder_command,
+        update_message_pattern=update_message_pattern,
         one_update_per_day=one_update_per_day,
         rank_report=rank_report,
         include_missed_days=include_missed_days,
@@ -156,7 +174,12 @@ class DiscordAutomationBot(discord.Client):
         super().__init__(**kwargs)
         self.config = config
         self.tasks_started = False
-        self.manual_command = config.weekly_report_command.strip().lower()
+        self.manual_weekly_command = config.weekly_report_command.strip().lower()
+        self.manual_reminder_command = config.manual_reminder_command.strip().lower()
+        self.update_message_regex = re.compile(config.update_message_pattern, re.IGNORECASE)
+
+    def is_update_message(self, content: str) -> bool:
+        return bool(self.update_message_regex.search(content))
 
     async def get_target_channel(self) -> Optional[discord.abc.Messageable]:
         channel = self.get_channel(self.config.channel_id)
@@ -193,7 +216,12 @@ class DiscordAutomationBot(discord.Client):
             if message.author.bot:
                 continue
 
-            if message.content.strip().lower() == self.manual_command:
+            normalized_content = message.content.strip().lower()
+            if normalized_content == self.manual_weekly_command:
+                continue
+            if normalized_content == self.manual_reminder_command:
+                continue
+            if not self.is_update_message(message.content):
                 continue
 
             uid = message.author.id
@@ -269,10 +297,12 @@ class DiscordAutomationBot(discord.Client):
         if message.channel.id != self.config.channel_id:
             return
 
-        if message.content.strip().lower() != self.manual_command:
+        normalized_content = message.content.strip().lower()
+        if normalized_content == self.manual_weekly_command:
+            await self.send_weekly_report(reason="manual")
             return
-
-        await self.send_weekly_report(reason="manual")
+        if normalized_content == self.manual_reminder_command:
+            await self.send_daily_reminder()
 
 
 def main():
