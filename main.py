@@ -200,6 +200,9 @@ def build_period_report(
     include_missed_days: bool,
 ) -> str:
     period_days = (period_end - period_start).days + 1
+    period_dates = [period_start + timedelta(days=offset) for offset in range(period_days)]
+    required_dates = [d for d in period_dates if d.weekday() not in {4, 5}]  # Exclude Friday/Saturday from missed-day targets.
+    required_days = len(required_dates)
     total_updates = sum(counts.values())
 
     ordered_user_ids = user_ids
@@ -210,7 +213,8 @@ def build_period_report(
     rows: list[list[str]] = []
     for idx, user_id in enumerate(ordered_user_ids, start=1):
         active = len(active_days[user_id])
-        missed = max(period_days - active, 0)
+        active_required = sum(1 for d in active_days[user_id] if d.weekday() not in {4, 5})
+        missed = max(required_days - active_required, 0)
         row = [
             str(idx),
             user_labels.get(user_id, str(user_id)),
