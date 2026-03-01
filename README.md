@@ -3,20 +3,23 @@
 Lightweight Discord bot built with `discord.py` to automate:
 
 - Daily reminder (mentions 6 users in a specific thread)
-- Weekly report every Thursday 8:00 PM (`Africa/Cairo`)
+- Weekly report for week-to-date (Sunday-current day)
+- Monthly report for calendar-month window
 - Report generation from one thread only
-- On-demand weekly report command at any time
+- On-demand weekly/monthly report commands at any time
 - Simple free-tier deployment (Railway / Render)
 
 ## Features
 
 - Python 3.10+
 - No database
-- Uses message history scan for the last 7 days
+- Uses message history scan for fixed calendar windows
 - Ignores bot messages in counting
 - Always includes all 6 users in weekly report (including `0`)
+- Supports monthly report with the same user set
 - Handles empty thread safely
 - Supports manual weekly report generation from thread command
+- Supports manual monthly report generation from thread command
 - Logs clear errors for thread lookup and missing permissions
 - Resumes schedulers automatically after process restart
 
@@ -35,13 +38,19 @@ flowchart TD
     H --> I[Send Reminder Mentioning 6 Users]
     I --> E
 
-    F --> J[Wait Until Next Thursday 20:00 Cairo]
+    F --> J[Wait Until Next Sunday 20:00 Cairo]
     J --> K[Resolve Thread]
-    K --> L[Read Last 7 Days Messages]
+    K --> L[Read Current Week (Sunday-Today) Messages]
     L --> M[Filter: 6 Users + Non-Bot]
     M --> N[Count Updates]
     N --> O[Post Weekly Report in Thread]
     O --> F
+
+    D --> M1[Start Monthly Scheduler]
+    M1 --> M2[Wait Until 1st Day of Next Month]
+    M2 --> M3[Read Previous Month Messages]
+    M3 --> M4[Post Monthly Report in Thread]
+    M4 --> M1
 
     D --> P[on_message]
     P --> Q{Message equals WEEKLY_REPORT_COMMAND\nand from target thread?}
@@ -69,7 +78,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    A[Trigger Thursday 20:00 Cairo] --> B[Fetch Thread]
+    A[Trigger Sunday 20:00 Cairo] --> B[Fetch Thread]
     B --> C[History: last 7 days]
     C --> D{Message author bot?}
     D -- yes --> C
@@ -109,19 +118,31 @@ Weekly:
 ```text
 \U0001F4CA Weekly Report
 
-<@user1> : X updates
-<@user2> : X updates
-...
-<@user6> : X updates
+Period: YYYY-MM-DD to YYYY-MM-DD (Week-to-date)
+Total Updates: X
+
+[ASCII table with Rank, User, Updates, Active Days, Missed Days, Contribution %]
+```
+
+Monthly:
+
+```text
+\U0001F4C8 Monthly Report
+
+Period: YYYY-MM-DD to YYYY-MM-DD (Month-to-date or Previous calendar month)
+Total Updates: X
+
+[ASCII table with Rank, User, Updates, Active Days, Missed Days, Contribution %]
 ```
 
 Manual trigger:
 
 ```text
 !weekly_report
+!monthly_report
 ```
 
-Post the command in the configured thread to generate the weekly report immediately.
+Post the command in the configured thread to generate the report immediately.
 
 ## Configuration
 
@@ -135,7 +156,9 @@ You can start from `.env.example`.
 | `USER_IDS` | Yes | - | Comma-separated list of exactly 6 user IDs |
 | `DAILY_REMINDER_TIME` | No | `16:00` | Daily reminder time (`HH:MM`, Cairo local time) |
 | `WEEKLY_REPORT_TIME` | No | `20:00` | Weekly report time (`HH:MM`, Cairo local time) |
+| `MONTHLY_REPORT_TIME` | No | `20:00` | Monthly report time (`HH:MM`, Cairo local time) |
 | `WEEKLY_REPORT_COMMAND` | No | `!weekly_report` | Command that triggers weekly report on demand in thread |
+| `MONTHLY_REPORT_COMMAND` | No | `!monthly_report` | Command that triggers monthly report on demand in thread |
 | `TIMEZONE` | No | `Africa/Cairo` | IANA timezone name |
 | `ONE_UPDATE_PER_DAY` | No | `false` | Optional dedupe: max 1 update per user per day |
 | `RANK_REPORT` | No | `false` | Optional ranking by update count |
@@ -166,7 +189,9 @@ $env:THREAD_ID="123456789012345678"
 $env:USER_IDS="111111111111111111,222222222222222222,333333333333333333,444444444444444444,555555555555555555,666666666666666666"
 $env:DAILY_REMINDER_TIME="16:00"
 $env:WEEKLY_REPORT_TIME="20:00"
+$env:MONTHLY_REPORT_TIME="20:00"
 $env:WEEKLY_REPORT_COMMAND="!weekly_report"
+$env:MONTHLY_REPORT_COMMAND="!monthly_report"
 $env:TIMEZONE="Africa/Cairo"
 ```
 
@@ -203,8 +228,10 @@ python main.py
 
 ## Operational Notes
 
-- Weekly report runs once per Thursday based on scheduler sleep-to-next-run logic.
-- Manual weekly report can be requested any time using `WEEKLY_REPORT_COMMAND` in the target thread.
+- Weekly report (scheduled/manual) uses week-to-date: from Sunday of current week to today.
+- If today is Sunday, weekly report includes Sunday only.
+- Scheduled monthly report runs on day 1 and reports the previous calendar month.
+- Manual monthly report reports from day 1 of the current month until now.
 - After host restarts, next run is recalculated from current Cairo time.
 - No persistent state is required.
 - Empty thread produces a valid report with all users at `0`.
