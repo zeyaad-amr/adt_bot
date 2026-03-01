@@ -190,6 +190,7 @@ def build_ascii_table(headers: list[str], rows: list[list[str]]) -> str:
 def build_period_report(
     title: str,
     user_ids: list[int],
+    user_labels: dict[int, str],
     counts: dict[int, int],
     active_days: dict[int, set[date]],
     period_start: date,
@@ -212,7 +213,7 @@ def build_period_report(
         missed = max(period_days - active, 0)
         row = [
             str(idx),
-            f"<@{user_id}>",
+            user_labels.get(user_id, str(user_id)),
             str(counts[user_id]),
             str(active),
             str(missed if include_missed_days else "-"),
@@ -331,6 +332,37 @@ class DiscordAutomationBot(discord.Client):
 
         return counts, active_days
 
+    async def resolve_user_labels(self, channel) -> dict[int, str]:
+        labels: dict[int, str] = {}
+        guild = getattr(channel, "guild", None)
+
+        for uid in self.config.user_ids:
+            label: Optional[str] = None
+
+            if guild is not None:
+                member = guild.get_member(uid)
+                if member is None:
+                    try:
+                        member = await guild.fetch_member(uid)
+                    except Exception:
+                        member = None
+                if member is not None:
+                    label = member.display_name
+
+            if label is None:
+                user_obj = self.get_user(uid)
+                if user_obj is None:
+                    try:
+                        user_obj = await self.fetch_user(uid)
+                    except Exception:
+                        user_obj = None
+                if user_obj is not None:
+                    label = user_obj.name
+
+            labels[uid] = label if label else str(uid)
+
+        return labels
+
     async def send_weekly_report(self, reason="scheduled"):
         channel = await self.get_target_channel()
         if channel is None:
@@ -339,10 +371,12 @@ class DiscordAutomationBot(discord.Client):
         now = datetime.now(self.config.timezone)
         start_date, end_date = self.weekly_period(now, reason)
         counts, active_days = await self.collect_counts_for_period(channel, start_date, end_date)
+        user_labels = await self.resolve_user_labels(channel)
 
         report = build_period_report(
             WEEKLY_REPORT_TITLE,
             self.config.user_ids,
+            user_labels,
             counts,
             active_days,
             start_date,
@@ -352,7 +386,7 @@ class DiscordAutomationBot(discord.Client):
             self.config.include_missed_days,
         )
 
-        await channel.send(report)
+        await channel.send(report, allowed_mentions=discord.AllowedMentions.none())
         logger.info("Weekly report (%s) sent for %s to %s.", reason, start_date, end_date)
 
     async def send_monthly_report(self, reason="scheduled"):
@@ -363,10 +397,12 @@ class DiscordAutomationBot(discord.Client):
         now = datetime.now(self.config.timezone)
         start_date, end_date, label = self.monthly_period(now, reason)
         counts, active_days = await self.collect_counts_for_period(channel, start_date, end_date)
+        user_labels = await self.resolve_user_labels(channel)
 
         report = build_period_report(
             MONTHLY_REPORT_TITLE,
             self.config.user_ids,
+            user_labels,
             counts,
             active_days,
             start_date,
@@ -376,7 +412,7 @@ class DiscordAutomationBot(discord.Client):
             self.config.include_missed_days,
         )
 
-        await channel.send(report)
+        await channel.send(report, allowed_mentions=discord.AllowedMentions.none())
         logger.info("Monthly report (%s) sent for %s to %s.", reason, start_date, end_date)
 
     async def daily_scheduler(self):
