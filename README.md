@@ -38,7 +38,7 @@ flowchart TD
     H --> I[Send Reminder Mentioning 6 Users]
     I --> E
 
-    F --> J[Wait Until Next Sunday 20:00 Cairo]
+    F --> J[Wait Until Next WEEKLY_REPORT_DAY 20:00 Cairo]
     J --> K[Resolve Thread]
     K --> L[Read Current Week (Sunday-Today) Messages]
     L --> M[Filter: 6 Users + Non-Bot]
@@ -78,7 +78,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    A[Trigger Sunday 20:00 Cairo] --> B[Fetch Thread]
+    A[Trigger WEEKLY_REPORT_DAY 20:00 Cairo] --> B[Fetch Thread]
     B --> C[History: last 7 days]
     C --> D{Message author bot?}
     D -- yes --> C
@@ -156,6 +156,7 @@ You can start from `.env.example`.
 | `USER_IDS` | Yes | - | Comma-separated list of exactly 6 user IDs |
 | `DAILY_REMINDER_TIME` | No | `16:00` | Daily reminder time (`HH:MM`, Cairo local time) |
 | `WEEKLY_REPORT_TIME` | No | `20:00` | Weekly report time (`HH:MM`, Cairo local time) |
+| `WEEKLY_REPORT_DAY` | No | `thursday` | Weekly report day (`monday`..`sunday`) |
 | `MONTHLY_REPORT_TIME` | No | `20:00` | Monthly report time (`HH:MM`, Cairo local time) |
 | `WEEKLY_REPORT_COMMAND` | No | `!weekly_report` | Command that triggers weekly report on demand in thread |
 | `MONTHLY_REPORT_COMMAND` | No | `!monthly_report` | Command that triggers monthly report on demand in thread |
@@ -189,6 +190,7 @@ $env:THREAD_ID="123456789012345678"
 $env:USER_IDS="111111111111111111,222222222222222222,333333333333333333,444444444444444444,555555555555555555,666666666666666666"
 $env:DAILY_REMINDER_TIME="16:00"
 $env:WEEKLY_REPORT_TIME="20:00"
+$env:WEEKLY_REPORT_DAY="thursday"
 $env:MONTHLY_REPORT_TIME="20:00"
 $env:WEEKLY_REPORT_COMMAND="!weekly_report"
 $env:MONTHLY_REPORT_COMMAND="!monthly_report"
@@ -229,6 +231,7 @@ python main.py
 ## Operational Notes
 
 - Weekly report (scheduled/manual) uses week-to-date: from Sunday of current week to today.
+- Scheduled weekly report day is controlled by `WEEKLY_REPORT_DAY` (default: `thursday`).
 - If today is Sunday, weekly report includes Sunday only.
 - Scheduled monthly report runs on day 1 and reports the previous calendar month.
 - Manual monthly report reports from day 1 of the current month until now.

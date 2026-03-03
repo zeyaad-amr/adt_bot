@@ -45,6 +45,7 @@ class BotConfig:
     timezone: ZoneInfo
     daily_reminder_time: time
     weekly_report_time: time
+    weekly_report_weekday: int
     monthly_report_time: time
     weekly_report_command: str
     monthly_report_command: str
@@ -81,6 +82,34 @@ def parse_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def parse_weekday(value: str, var_name: str) -> int:
+    normalized = value.strip().lower()
+    weekday_map = {
+        "monday": 0,
+        "mon": 0,
+        "tuesday": 1,
+        "tue": 1,
+        "tues": 1,
+        "wednesday": 2,
+        "wed": 2,
+        "thursday": 3,
+        "thu": 3,
+        "thur": 3,
+        "thurs": 3,
+        "friday": 4,
+        "fri": 4,
+        "saturday": 5,
+        "sat": 5,
+        "sunday": 6,
+        "sun": 6,
+    }
+    if normalized not in weekday_map:
+        raise ValueError(
+            f"{var_name} must be a valid weekday name (e.g., Monday or Mon). Got: {value!r}"
+        )
+    return weekday_map[normalized]
+
+
 def load_config() -> BotConfig:
     token = os.getenv("BOT_TOKEN", "").strip()
     channel_id_raw = os.getenv("CHANNEL_ID", "").strip()
@@ -88,6 +117,7 @@ def load_config() -> BotConfig:
     timezone_name = os.getenv("TIMEZONE", "Africa/Cairo").strip()
     daily_time_raw = os.getenv("DAILY_REMINDER_TIME", "16:00").strip()
     weekly_time_raw = os.getenv("WEEKLY_REPORT_TIME", "20:00").strip()
+    weekly_day_raw = os.getenv("WEEKLY_REPORT_DAY", "thursday").strip()
     monthly_time_raw = os.getenv("MONTHLY_REPORT_TIME", "20:00").strip()
     weekly_report_command = os.getenv("WEEKLY_REPORT_COMMAND", "!weekly_report").strip()
     monthly_report_command = os.getenv("MONTHLY_REPORT_COMMAND", "!monthly_report").strip()
@@ -131,6 +161,7 @@ def load_config() -> BotConfig:
         timezone=timezone_obj,
         daily_reminder_time=parse_time(daily_time_raw, "DAILY_REMINDER_TIME"),
         weekly_report_time=parse_time(weekly_time_raw, "WEEKLY_REPORT_TIME"),
+        weekly_report_weekday=parse_weekday(weekly_day_raw, "WEEKLY_REPORT_DAY"),
         monthly_report_time=parse_time(monthly_time_raw, "MONTHLY_REPORT_TIME"),
         weekly_report_command=weekly_report_command,
         monthly_report_command=monthly_report_command,
@@ -433,7 +464,7 @@ class DiscordAutomationBot(discord.Client):
             wait_seconds = seconds_until_next_run(
                 self.config.weekly_report_time,
                 self.config.timezone,
-                weekday=6,
+                weekday=self.config.weekly_report_weekday,
             )
             await asyncio.sleep(wait_seconds)
             await self.send_weekly_report()
