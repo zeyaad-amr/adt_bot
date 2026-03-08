@@ -71,9 +71,7 @@ def make_local_dt(tz, y: int, m: int, d: int, hh: int, mm: int = 0) -> datetime:
 
 def week_window(now: datetime, manual: bool) -> tuple[date, date]:
     today = now.date()
-    days_since_sunday = (today.weekday() + 1) % 7
-    start_date = today - timedelta(days=days_since_sunday)
-    return start_date, today
+    return today - timedelta(days=6), today
 
 
 def month_window(now: datetime, manual: bool) -> tuple[date, date]:
@@ -153,8 +151,6 @@ async def run() -> None:
     print(f"Timezone: {config.timezone_name}")
     print(f"Users configured: {len(config.user_ids)}")
     print(f"ONE_UPDATE_PER_DAY={config.one_update_per_day}")
-    print(f"RANK_REPORT={config.rank_report}")
-    print(f"INCLUDE_MISSED_DAYS={config.include_missed_days}")
     print()
 
     w_s_start, w_s_end = week_window(now, manual=False)

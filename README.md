@@ -3,7 +3,7 @@
 Lightweight Discord bot built with `discord.py` to automate:
 
 - Daily reminder (mentions 6 users in a specific thread)
-- Weekly report for week-to-date (Sunday-current day)
+- Weekly report for last 7 days (current day + previous 6 days)
 - Monthly report for calendar-month window
 - Report generation from one thread only
 - On-demand weekly/monthly report commands at any time
@@ -85,8 +85,7 @@ flowchart LR
     D -- no --> E{Author in USER_IDS?}
     E -- no --> C
     E -- yes --> F[Count message]
-    F --> G[Track active day]
-    G --> C
+    F --> C
     C --> H[Build report lines for all 6 users]
     H --> I[Post report in same thread]
 ```
@@ -118,10 +117,10 @@ Weekly:
 ```text
 \U0001F4CA Weekly Report
 
-Period: YYYY-MM-DD to YYYY-MM-DD (Week-to-date)
+Period: YYYY-MM-DD to YYYY-MM-DD (Last 7 days)
 Total Updates: X
 
-[ASCII table with Rank, User, Updates, Active Days, Missed Days, Contribution %]
+[ASCII table with User, Updates]
 ```
 
 Monthly:
@@ -132,7 +131,7 @@ Monthly:
 Period: YYYY-MM-DD to YYYY-MM-DD (Month-to-date or Previous calendar month)
 Total Updates: X
 
-[ASCII table with Rank, User, Updates, Active Days, Missed Days, Contribution %]
+[ASCII table with User, Updates]
 ```
 
 Manual trigger:
@@ -162,8 +161,6 @@ You can start from `.env.example`.
 | `MONTHLY_REPORT_COMMAND` | No | `!monthly_report` | Command that triggers monthly report on demand in thread |
 | `TIMEZONE` | No | `Africa/Cairo` | IANA timezone name |
 | `ONE_UPDATE_PER_DAY` | No | `false` | Optional dedupe: max 1 update per user per day |
-| `RANK_REPORT` | No | `false` | Optional ranking by update count |
-| `INCLUDE_MISSED_DAYS` | No | `false` | Optional `Missed Days` in weekly lines |
 | `LOG_LEVEL` | No | `INFO` | Logging verbosity |
 
 ## Permissions Required
@@ -230,7 +227,7 @@ python main.py
 
 ## Operational Notes
 
-- Weekly report (scheduled/manual) uses week-to-date: from Sunday of current week to today.
+- Weekly report (scheduled/manual) uses a rolling 7-day window: current day plus previous 6 days.
 - Scheduled weekly report day is controlled by `WEEKLY_REPORT_DAY` (default: `thursday`).
 - If today is Sunday, weekly report includes Sunday only.
 - Scheduled monthly report runs on day 1 and reports the previous calendar month.

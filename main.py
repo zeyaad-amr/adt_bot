@@ -52,8 +52,6 @@ class BotConfig:
     manual_reminder_command: str
     update_message_pattern: str
     one_update_per_day: bool
-    rank_report: bool
-    include_missed_days: bool
 
 
 def parse_time(value: str, var_name: str) -> time:
@@ -127,8 +125,6 @@ def load_config() -> BotConfig:
         r"\b(daily\W*updates?|updates?)\b",
     ).strip()
     one_update_per_day = parse_bool(os.getenv("ONE_UPDATE_PER_DAY", "false"))
-    rank_report = parse_bool(os.getenv("RANK_REPORT", "false"))
-    include_missed_days = parse_bool(os.getenv("INCLUDE_MISSED_DAYS", "false"))
 
     if not token:
         raise ValueError("BOT_TOKEN is required.")
@@ -168,8 +164,6 @@ def load_config() -> BotConfig:
         manual_reminder_command=manual_reminder_command,
         update_message_pattern=update_message_pattern,
         one_update_per_day=one_update_per_day,
-        rank_report=rank_report,
-        include_missed_days=include_missed_days,
     )
 
 
@@ -223,35 +217,18 @@ def build_period_report(
     user_ids: list[int],
     user_labels: dict[int, str],
     counts: dict[int, int],
-    active_days: dict[int, set[date]],
     period_start: date,
     period_end: date,
     period_label: str,
-    rank_report: bool,
-    include_missed_days: bool,
 ) -> str:
-    period_days = (period_end - period_start).days + 1
-    period_dates = [period_start + timedelta(days=offset) for offset in range(period_days)]
-    required_dates = [d for d in period_dates if d.weekday() not in {4, 5}]  # Exclude Friday/Saturday from missed-day targets.
-    required_days = len(required_dates)
     total_updates = sum(counts.values())
 
-    ordered_user_ids = user_ids
-    if rank_report:
-        ordered_user_ids = sorted(user_ids, key=lambda uid: counts[uid], reverse=True)
-
-    headers = ["Rank", "User", "Updates", "Active Days", "Missed Days"]
+    headers = ["User", "Updates"]
     rows: list[list[str]] = []
-    for idx, user_id in enumerate(ordered_user_ids, start=1):
-        active = len(active_days[user_id])
-        active_required = sum(1 for d in active_days[user_id] if d.weekday() not in {4, 5})
-        missed = max(required_days - active_required, 0)
+    for user_id in user_ids:
         row = [
-            str(idx),
             user_labels.get(user_id, str(user_id)),
             str(counts[user_id]),
-            str(active),
-            str(missed if include_missed_days else "-"),
         ]
         rows.append(row)
 
@@ -306,10 +283,9 @@ class DiscordAutomationBot(discord.Client):
 
     def weekly_period(self, now: datetime, reason: str) -> tuple[date, date]:
         today = now.date()
-        # Sunday-based week-to-date window. Sunday => one-day window.
-        days_since_sunday = (today.weekday() + 1) % 7
-        start_date = today - timedelta(days=days_since_sunday)
+        # Rolling 7-day window: current day + previous 6 days.
         end_date = today
+        start_date = today - timedelta(days=6)
         return start_date, end_date
 
     def monthly_period(self, now: datetime, reason: str) -> tuple[date, date, str]:
@@ -331,7 +307,6 @@ class DiscordAutomationBot(discord.Client):
         end_time = datetime.combine(end_date, time.max, tzinfo=self.config.timezone)
 
         counts = {uid: 0 for uid in self.config.user_ids}
-        active_days = {uid: set() for uid in self.config.user_ids}
         seen_daily = set()
 
         async for message in channel.history(limit=None, after=start_time - timedelta(seconds=1), before=end_time + timedelta(seconds=1)):
@@ -363,9 +338,7 @@ class DiscordAutomationBot(discord.Client):
                 seen_daily.add(key)
 
             counts[uid] += 1
-            active_days[uid].add(local_day)
-
-        return counts, active_days
+        return counts
 
     async def resolve_user_labels(self, channel) -> dict[int, str]:
         labels: dict[int, str] = {}
@@ -405,7 +378,7 @@ class DiscordAutomationBot(discord.Client):
 
         now = datetime.now(self.config.timezone)
         start_date, end_date = self.weekly_period(now, reason)
-        counts, active_days = await self.collect_counts_for_period(channel, start_date, end_date)
+        counts = await self.collect_counts_for_period(channel, start_date, end_date)
         user_labels = await self.resolve_user_labels(channel)
 
         report = build_period_report(
@@ -413,12 +386,9 @@ class DiscordAutomationBot(discord.Client):
             self.config.user_ids,
             user_labels,
             counts,
-            active_days,
             start_date,
             end_date,
-            "Week-to-date (Sunday-current day)",
-            self.config.rank_report,
-            self.config.include_missed_days,
+            "Last 7 days (current day + previous 6 days)",
         )
 
         await channel.send(report, allowed_mentions=discord.AllowedMentions.none())
@@ -431,7 +401,7 @@ class DiscordAutomationBot(discord.Client):
 
         now = datetime.now(self.config.timezone)
         start_date, end_date, label = self.monthly_period(now, reason)
-        counts, active_days = await self.collect_counts_for_period(channel, start_date, end_date)
+        counts = await self.collect_counts_for_period(channel, start_date, end_date)
         user_labels = await self.resolve_user_labels(channel)
 
         report = build_period_report(
@@ -439,12 +409,9 @@ class DiscordAutomationBot(discord.Client):
             self.config.user_ids,
             user_labels,
             counts,
-            active_days,
             start_date,
             end_date,
             label,
-            self.config.rank_report,
-            self.config.include_missed_days,
         )
 
         await channel.send(report, allowed_mentions=discord.AllowedMentions.none())
