@@ -11,9 +11,11 @@ Features:
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Optional
@@ -50,6 +52,7 @@ class BotConfig:
     weekly_report_command: str
     monthly_report_command: str
     manual_reminder_command: str
+    export_updates_command: str
     update_message_pattern: str
     one_update_per_day: bool
 
@@ -120,6 +123,7 @@ def load_config() -> BotConfig:
     weekly_report_command = os.getenv("WEEKLY_REPORT_COMMAND", "!weekly_report").strip()
     monthly_report_command = os.getenv("MONTHLY_REPORT_COMMAND", "!monthly_report").strip()
     manual_reminder_command = os.getenv("MANUAL_REMINDER_COMMAND", "!daily_reminder").strip()
+    export_updates_command = os.getenv("EXPORT_UPDATES_COMMAND", "!export_updates").strip()
     update_message_pattern = os.getenv(
         "UPDATE_MESSAGE_PATTERN",
         r"\b(daily\W*updates?|updates?)\b",
@@ -138,6 +142,8 @@ def load_config() -> BotConfig:
         raise ValueError("MONTHLY_REPORT_COMMAND cannot be empty.")
     if not manual_reminder_command:
         raise ValueError("MANUAL_REMINDER_COMMAND cannot be empty.")
+    if not export_updates_command:
+        raise ValueError("EXPORT_UPDATES_COMMAND cannot be empty.")
     if not update_message_pattern:
         raise ValueError("UPDATE_MESSAGE_PATTERN cannot be empty.")
 
@@ -162,6 +168,7 @@ def load_config() -> BotConfig:
         weekly_report_command=weekly_report_command,
         monthly_report_command=monthly_report_command,
         manual_reminder_command=manual_reminder_command,
+        export_updates_command=export_updates_command,
         update_message_pattern=update_message_pattern,
         one_update_per_day=one_update_per_day,
     )
@@ -253,6 +260,7 @@ class DiscordAutomationBot(discord.Client):
         self.manual_weekly_command = config.weekly_report_command.strip().lower()
         self.manual_monthly_command = config.monthly_report_command.strip().lower()
         self.manual_reminder_command = config.manual_reminder_command.strip().lower()
+        self.manual_export_command = config.export_updates_command.strip().lower()
         self.update_message_regex = re.compile(config.update_message_pattern, re.IGNORECASE)
 
     def is_update_message(self, content: str) -> bool:
@@ -320,6 +328,9 @@ class DiscordAutomationBot(discord.Client):
                 continue
             if normalized_content == self.manual_reminder_command:
                 continue
+            first_token = normalized_content.split(None, 1)[0] if normalized_content else ""
+            if first_token == self.manual_export_command:
+                continue
             if not self.is_update_message(message.content):
                 continue
 
@@ -339,6 +350,106 @@ class DiscordAutomationBot(discord.Client):
 
             counts[uid] += 1
         return counts
+
+    async def collect_updates_for_period(
+        self, channel, start_date: date, end_date: date
+    ) -> list[tuple[datetime, int, str]]:
+        start_time = datetime.combine(start_date, time.min, tzinfo=self.config.timezone)
+        end_time = datetime.combine(end_date, time.max, tzinfo=self.config.timezone)
+
+        tracked_ids = set(self.config.user_ids)
+        updates: list[tuple[datetime, int, str]] = []
+        seen_daily: set[tuple[int, date]] = set()
+
+        async for message in channel.history(
+            limit=None,
+            after=start_time - timedelta(seconds=1),
+            before=end_time + timedelta(seconds=1),
+        ):
+            if message.author.bot:
+                continue
+
+            normalized_content = message.content.strip().lower()
+            if normalized_content in {
+                self.manual_weekly_command,
+                self.manual_monthly_command,
+                self.manual_reminder_command,
+            }:
+                continue
+            first_token = normalized_content.split(None, 1)[0] if normalized_content else ""
+            if first_token == self.manual_export_command:
+                continue
+            if not self.is_update_message(message.content):
+                continue
+
+            uid = message.author.id
+            if uid not in tracked_ids:
+                continue
+
+            local_dt = message.created_at.astimezone(self.config.timezone)
+            local_day = local_dt.date()
+            if local_day < start_date or local_day > end_date:
+                continue
+
+            if self.config.one_update_per_day:
+                key = (uid, local_day)
+                if key in seen_daily:
+                    continue
+                seen_daily.add(key)
+
+            updates.append((local_dt, uid, message.content))
+
+        updates.sort(key=lambda item: item[0])
+        return updates
+
+    @staticmethod
+    def parse_export_date(value: str, today: date) -> date:
+        normalized = value.strip().lower()
+        if normalized in {"today", "now"}:
+            return today
+        try:
+            return date.fromisoformat(normalized)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid date {value!r}. Use YYYY-MM-DD or 'today'."
+            ) from exc
+
+    @staticmethod
+    def build_updates_markdown(
+        updates: list[tuple[datetime, int, str]],
+        user_labels: dict[int, str],
+        start_date: date,
+        end_date: date,
+    ) -> str:
+        by_day: dict[date, list[tuple[datetime, int, str]]] = defaultdict(list)
+        for local_dt, uid, content in updates:
+            by_day[local_dt.date()].append((local_dt, uid, content))
+
+        lines: list[str] = [
+            "# Updates Report",
+            f"**Period:** {start_date.isoformat()} to {end_date.isoformat()}",
+            f"**Total updates:** {len(updates)}",
+            "",
+        ]
+
+        if not updates:
+            lines.append("_No updates found in this period._")
+            return "\n".join(lines) + "\n"
+
+        for day in sorted(by_day.keys()):
+            weekday_name = day.strftime("%A")
+            lines.append(f"## {day.isoformat()} ({weekday_name})")
+            for local_dt, uid, content in by_day[day]:
+                label = user_labels.get(uid, str(uid))
+                time_str = local_dt.strftime("%H:%M")
+                content_lines = content.splitlines() or [""]
+                first_line = content_lines[0].rstrip()
+                lines.append(f"- **{label}** — {time_str} — {first_line}")
+                for extra in content_lines[1:]:
+                    lines.append(f"  {extra.rstrip()}")
+            lines.append("")
+
+        return "\n".join(lines) + "\n"
 
     async def resolve_user_labels(self, channel) -> dict[int, str]:
         labels: dict[int, str] = {}
@@ -417,6 +528,63 @@ class DiscordAutomationBot(discord.Client):
         await channel.send(report, allowed_mentions=discord.AllowedMentions.none())
         logger.info("Monthly report (%s) sent for %s to %s.", reason, start_date, end_date)
 
+    async def send_updates_export(self, args_str: str):
+        channel = await self.get_target_channel()
+        if channel is None:
+            return
+
+        today = datetime.now(self.config.timezone).date()
+        args = args_str.split()
+
+        if not args:
+            await channel.send(
+                f"Usage: `{self.config.export_updates_command} <start> [end]`\n"
+                "Dates use `YYYY-MM-DD`. `end` defaults to today; you can also pass `today`.",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
+
+        try:
+            start_date = self.parse_export_date(args[0], today)
+            end_date = self.parse_export_date(args[1], today) if len(args) > 1 else today
+        except ValueError as exc:
+            await channel.send(
+                f"❌ {exc}",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
+
+        if start_date > end_date:
+            await channel.send(
+                f"❌ Start date {start_date.isoformat()} is after end date {end_date.isoformat()}.",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
+
+        updates = await self.collect_updates_for_period(channel, start_date, end_date)
+        user_labels = await self.resolve_user_labels(channel)
+        md_content = self.build_updates_markdown(updates, user_labels, start_date, end_date)
+
+        filename = f"updates_{start_date.isoformat()}_to_{end_date.isoformat()}.md"
+        data = io.BytesIO(md_content.encode("utf-8"))
+        discord_file = discord.File(data, filename=filename)
+
+        summary = (
+            f"\U0001F4C4 Updates export — {start_date.isoformat()} to "
+            f"{end_date.isoformat()} ({len(updates)} update{'s' if len(updates) != 1 else ''})"
+        )
+        await channel.send(
+            summary,
+            file=discord_file,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        logger.info(
+            "Updates export sent for %s to %s (%d updates).",
+            start_date,
+            end_date,
+            len(updates),
+        )
+
     async def daily_scheduler(self):
         while not self.is_closed():
             wait_seconds = seconds_until_next_run(
@@ -473,6 +641,13 @@ class DiscordAutomationBot(discord.Client):
             return
         if normalized_content == self.manual_reminder_command:
             await self.send_daily_reminder()
+            return
+
+        stripped_content = message.content.strip()
+        parts = stripped_content.split(None, 1)
+        if parts and parts[0].lower() == self.manual_export_command:
+            args_str = parts[1] if len(parts) > 1 else ""
+            await self.send_updates_export(args_str)
 
 
 def main():

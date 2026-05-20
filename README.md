@@ -5,6 +5,7 @@ Lightweight Discord bot built with `discord.py` to automate:
 - Daily reminder (mentions 6 users in a specific thread)
 - Weekly report for last 7 days (current day + previous 6 days)
 - Monthly report for calendar-month window
+- Export all updates between two dates to a Markdown file
 - Report generation from one thread only
 - On-demand weekly/monthly report commands at any time
 - Simple free-tier deployment (Railway / Render)
@@ -143,6 +144,30 @@ Manual trigger:
 
 Post the command in the configured thread to generate the report immediately.
 
+Export updates between two dates:
+
+```text
+!export_updates 2026-05-01 2026-05-20
+!export_updates 2026-05-01 today
+!export_updates 2026-05-01
+```
+
+- Dates use `YYYY-MM-DD` format.
+- The end date is optional and defaults to today; you can also pass the literal `today`.
+- The bot posts a Markdown file (`updates_<start>_to_<end>.md`) in the thread, grouped by date with the user and update content for each entry.
+
+Example file contents:
+
+```markdown
+# Updates Report
+**Period:** 2026-05-01 to 2026-05-20
+**Total updates:** 42
+
+## 2026-05-01 (Friday)
+- **Alice** — 14:03 — daily updates: did X, Y
+- **Bob** — 15:11 — updates: finished Z
+```
+
 ## Configuration
 
 Set environment variables in your host platform (or local shell).
@@ -159,6 +184,7 @@ You can start from `.env.example`.
 | `MONTHLY_REPORT_TIME` | No | `20:00` | Monthly report time (`HH:MM`, Cairo local time) |
 | `WEEKLY_REPORT_COMMAND` | No | `!weekly_report` | Command that triggers weekly report on demand in thread |
 | `MONTHLY_REPORT_COMMAND` | No | `!monthly_report` | Command that triggers monthly report on demand in thread |
+| `EXPORT_UPDATES_COMMAND` | No | `!export_updates` | Command that exports all updates between two dates to a Markdown file |
 | `TIMEZONE` | No | `Africa/Cairo` | IANA timezone name |
 | `ONE_UPDATE_PER_DAY` | No | `false` | Optional dedupe: max 1 update per user per day |
 | `LOG_LEVEL` | No | `INFO` | Logging verbosity |
